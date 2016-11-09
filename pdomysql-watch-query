@@ -1,0 +1,189 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.006001;
+use strict;
+use warnings;
+use Getopt::Std qw( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("ht:p:l:dt:s:c:T:P:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $port = $opts{P} || "";
+my $port_condition = "";
+if ($port) {
+    $port_condition = <<_EOS_;
+    if (port != $port) {
+        next
+    }
+_EOS_
+}
+
+my $count = $opts{c} || 100;
+if ($count !~ /^\d+$/) {
+    die "Bad -t option value \"$count\": not look like count\n";
+}
+
+my $count_condition = "";
+if ($count > 0) {
+    $count_condition = <<_EOS_;
+    if (++nreqs > $count) {
+        warn("up to max requests:$count")
+        exit();
+    }
+_EOS_
+}
+
+my $sql = $opts{s} || "" ;
+my $sql_condition = "";
+if ($sql) {
+   $sql_condition = <<_EOS_;
+   if (sql !~ "$sql") {
+        next
+   }
+_EOS_
+}
+
+my $pid = $opts{p} || 0;
+if ($pid !~ /^\d+$/) {
+    die "Bad -p option value \"$pid\": not look like a pid\n";
+}
+
+my $php_path = "";
+if ($pid) {
+    my $exec_file = "/proc/$pid/exe";
+    if (!-f $exec_file) {
+        die "PHP $pid is not running or ",
+            "you do not have enough permissions.\n";
+    }
+    $php_path = readlink $exec_file;
+} else {
+    my $path = $opts{l} || "";
+    if (! -f $path) {
+        die "pdo_mysql.so path $path is not exist or ",
+        "you do not have enough permissions.\n";
+    }
+    $php_path = $path;
+}
+
+my $time = $opts{t} || 20000;
+if ($time !~ /^\d+$/) {
+    die "Bad -t option value \"$time\": not look like time\n";
+}
+
+my $slowtime = $opts{T} || 0;
+if ($slowtime !~ /^\d+$/) {
+    die "Bad -T option value \"$slowtime\": not look like time\n";
+}
+
+my $stap_args = $opts{a} || '';
+
+my $preamble = <<_EOS_;
+global tracet%
+global trace%
+global nreqs
+
+probe begin {
+    warn("Tracing pdo-mysql ($pid)")
+    nreqs = 0
+}
+_EOS_
+
+my $stap_src = <<_EOS_;
+$preamble
+
+probe process("$php_path").function("pdo_mysql_stmt_execute") {
+        qs = \@cast(\$stmt, "pdo_stmt_t")->active_query_string
+        qs_len = \@cast(\$stmt, "pdo_stmt_t")->active_query_stringlen
+        sql = user_string_n(qs, qs_len)
+        $sql_condition
+
+        S = \@cast(\$stmt, "struct _pdo_stmt_t")->driver_data
+        H = \@cast(S, "pdo_mysql_stmt")->H
+        server = \@cast(H, "pdo_mysql_db_handle")->server
+
+        if (\@defined(server->data)) {
+            host_len = server->data->host_len
+            host = server->data->host
+            port = server->data->port
+            user = server->data->user
+        } else {
+            host = server->host ? server->host : server->host_info
+            port = server->port
+            user = server->user
+        }
+
+        $port_condition
+
+        trace[tid()] = sprintf("%s:%d\@%s: %s", host_len ? user_string_n(host, host_len) : user_string(host), port, user_string(user), sql)
+        tracet[tid()] = gettimeofday_us()
+}
+
+probe process("$php_path").function("pdo_mysql_stmt_execute").return {
+    begin = tracet[tid()]
+
+    if (begin) {
+        elapsed = (gettimeofday_us() - begin) / 1000
+        if (elapsed < $slowtime) {
+           next
+        }
+        $count_condition
+        printf("%s(%d) %s RT:%d(ms) RTCODE:%d\\n", execname(), pid(), trace[tid()], elapsed, \$return)
+    }
+}
+
+%(
+$time > 0
+%?
+probe timer.ms($time) {
+    warn("Time Ending....")
+    exit()
+}
+%:
+probe end {
+    exit()
+}
+%)
+_EOS_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit;
+}
+
+open my $in, "|stap --skip-badvars -x $pid $stap_args -"
+    or die "Cannot run stap: $!\n";
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+
+    return <<'_EOC_';
+Usage:
+    pdomysql-watch-query [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+    -p <pid>            Specify the pid to sampling.
+    -l <pdo_mysql.so>   Specify the path of pdo_mysql.so to sampling.
+    -c <count>          Specify the max requests default 100.
+    -t <time>ms         Specify the number of mseconds for sampling.
+    -T <slow time>ms    Specify the threshold of mseconds for sampling.
+    -s <sql>            Specify the sql to sampling.
+    -P <port>           Specify the port to sampling.
+Examples:
+    pdomysql-watch-query -p 12345 -c 100 -T 1000
+_EOC_
+}

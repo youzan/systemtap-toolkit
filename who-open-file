@@ -1,0 +1,76 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.0006001;
+use strict;
+use warnings;
+use Getopt::Std qw ( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("ha:t:f:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $stap_args = $opts{a} || '';
+getopts('df:t:', \%opts) or die usage();
+
+my $time = $opts{t} || 10000;
+if ($time !~ /^\d+$/) {
+   die "Bad -t options value \"$time\": not look like time";
+}
+
+my $filename = $opts{f} || '.*';
+
+my $preamble = <<_EOC_;
+probe begin {
+    printf("Collecting who is opening filename $filename \\r\\n\\r\\n");
+}
+_EOC_
+
+my $stap_src = <<_EOC_;
+$preamble
+
+probe syscall.open {
+    if (filename =~ %( \$# == 0 %? ".*" %: \@1 %)) {
+        printf("%s(%d) is opening the filename: %s\\r\\n", execname(), pid(), filename)
+    }
+}
+
+probe timer.ms($time) {
+    exit()
+}
+_EOC_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit();
+}
+
+open my $in, "| stap $stap_args --skip-badvars - $filename";
+
+print $in $stap_src;
+
+close $in;
+
+
+sub usage() {
+    return <<'_EOC_';
+Usage:
+    who-open-file [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -t <time>(ms)       Time(ms) to execute.
+    -f <filename>       Filename to open.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+Examples:
+    who-open-file -t 10000 -f xx
+_EOC_
+}

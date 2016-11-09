@@ -1,0 +1,94 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.006001;
+use strict;
+use warnings;
+use Getopt::Std qw ( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("hdt:a:p:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $time = $opts{t} || 10000;
+my $pid = $opts{p} || 0;
+
+if ($time !~ /^\d+$/) {
+    die "Bad -t option value \"$time\": not look like a time.\n";
+}
+
+if ($pid !~ /^\d+$/) {
+    die "Bad -p option value \"$pid\": not look like a pid.\n";
+}
+
+my $codition = "";
+
+if ($pid > 0) {
+    $codition = "if (pid() != target()) next"
+}
+
+my $preamble = <<_EOS_;
+probe begin {
+    warn(sprintf("tracking $pid tcp packet\\n"))
+}
+
+_EOS_
+
+chomp $preamble;
+
+my $stap_src = <<_EOS_;
+$preamble
+
+probe netfilter.ip.local_in {
+    $codition
+    printf("%d %s:%d <= %s:%d len:%d SYN:%d ACK:%d FIN:%d RST:%d PSH:%d URG:%d\\n", gettimeofday_us(), saddr, sport, daddr, dport, length, syn, ack, fin, rst, psh, urg);
+}
+
+probe netfilter.ip.local_out {
+    $codition
+    printf("%d %s:%d => %s:%d len:%d SYN:%d ACK:%d FIN:%d RST:%d PSH:%d URG:%d\\n", gettimeofday_us(), saddr, sport, daddr, dport, length, syn, ack, fin, rst, psh, urg);
+}
+
+probe timer.ms($time) {
+    exit()
+}
+_EOS_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit;
+}
+
+my $in;
+if ($pid > 0) {
+    open $in, "| stap --skip-badvars -x $pid -";
+} else {
+    open $in, "| stap --skip-badvars -";
+}
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+    return <<'_EOS_';
+Usage:
+    tcp-trace-packet [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -t <time>(ms)       Time(ms) to execute.
+    -p <pid>            Process id to trace.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+Examples:
+    tcp-trace-packet -t 20000 -p 12345
+_EOS_
+}

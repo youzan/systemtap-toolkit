@@ -1,0 +1,96 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.006001;
+use strict;
+use warnings;
+use Getopt::Std qw ( getopts );
+
+sub usage();
+
+
+my %opts;
+
+getopts("ht:a:df:v:p:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $function = $opts{f}
+    or die "no function name specified by the -f option.\n";
+
+my $vars = $opts{v}
+    or die "no var name specified by the -v option.\n";
+
+my $time = $opts{t} || '10000';
+
+if ($time !~ /^\d+$/) {
+    die "Bad -t option value \"$time\": not look like a time.\n";
+}
+
+my $pid = $opts{p}
+    or die "No process pid specified by the -p option.\n";
+
+if ($pid !~ /^\d+$/) {
+    die "Bad -p option value \"$pid\": not look like a pid.\n";
+}
+
+
+my $preamble = <<_EOC_;
+probe begin {
+    warn(sprintf("Tracing vars $function $vars in $pid...\\n"))
+}
+_EOC_
+chomp $preamble;
+
+my $stap_src =<<_EOC_;
+$preamble
+
+global vars%
+
+probe \$1 {
+    if (pid() != target()) next
+    if (\@defined(\$2)) {
+        newvar = \$2
+        if (vars[tid()] != newvar) {
+            printf("%s[%d] %s %s: \\"%s\\" => \\"%s\\" \\n", execname(), tid(), pp(), \@2, vars[tid()], newvar);
+            vars[tid()] = newvar;
+        }
+    }
+}
+
+probe timer.ms($time) {
+    exit()
+}
+_EOC_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit();
+}
+
+open my $in, "| stap --skip-badvars -x $pid - '$function' '$vars'";
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+    return <<_EOS_;
+Usage:
+    watch-var [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -t <time>(ms)       Time(ms) to execute.
+    -p <pid>            Process id to trace.
+    -f <function>       Function name to trace like syscall.connect.
+    -v <vars>           vars to trace like \$\$params filename.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+Examples:
+    watch-var -t 20000 -f "syscall.open" -v filename -p 123
+_EOS_
+}

@@ -1,0 +1,86 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.0006001;
+use strict;
+use warnings;
+use Getopt::Std qw ( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("ha:dt:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage;
+    exit;
+}
+
+my $stap_args = $opts{a} || "";
+
+my $time = $opts{t} || 5000;
+
+my $stap_src = <<_EOC_;
+global r%, w%, io%
+
+probe begin {
+    warn("Collecting IO Process Top 10 with interval of ${time}ms")
+}
+
+probe vfs.write.return {
+    w[execname(), pid()] += bytes_written
+}
+
+probe vfs.read.return {
+    r[execname(), pid()] += bytes_read
+}
+
+probe timer.ms($time) {
+    printf("%20s%6s\t%10s\t%10s\\n", "Process Name", "", "Read(KB)", "Write(KB)")
+
+    foreach ([name, pid] in w) {
+        io[name, pid] += w[name, pid]
+    }
+
+    foreach ([name, pid] in r) {
+        io[name, pid] += r[name, pid]
+    }
+
+    foreach([name, pid] in io- limit 10) {
+        printf("%20s(%-6d)\t%10d\t%10d\\n", name, pid, r[name, pid]/1024, w[name, pid]/1024)
+    }
+
+    delete r
+    delete w
+    delete io
+
+    print("\\n")
+}
+_EOC_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit;
+}
+
+open my $in, "| stap $stap_args --skip-badvars -";
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+    return <<'_EOC_';
+Usage:
+    io-process-top [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+    -t <time>(ms)       Specify the interval time to sampling.
+Examples:
+    io-process-top
+_EOC_
+}

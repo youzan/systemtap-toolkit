@@ -1,0 +1,168 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.006001;
+use strict;
+use warnings;
+use Getopt::Std qw( getopts );
+
+sub usage();
+
+
+my %opts;
+
+getopts("ha:p:dt:c:T:u:l:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $stap_args = $opts{a} || "";
+
+
+my $l = $opts{l} || "";
+my $r = `ldconfig -p |grep libcurl`;
+my $libcurl_path = "";
+
+if (!$l) {
+    if ($r =~ /=> (.*)/) {
+        $libcurl_path = $1;
+    }
+} else {
+    $libcurl_path = $l;
+}
+
+if (!-f $libcurl_path) {
+    die "libcurl not found\n";
+}
+
+my $pid = $opts{p} || 0;
+if ($pid !~ /^[\d\s]+$/) {
+    die "Bad -p option value \"$pid\": not look like a pid\n";
+}
+
+my $count = $opts{c} || 100;
+my $count_codition = <<_EOS_;
+if (nreqs++ > $count) {
+    warn("up to max requests: $count")
+}
+_EOS_
+
+my $url = $opts{u} || "";
+my $url_condition = "";
+
+if ($url) {
+    $url_condition = <<_EOS_;
+    if (user_string(url) !~ "$url") {
+        next
+    }
+_EOS_
+}
+
+my $time = $opts{t} || 20000;
+if ($time !~ /^\d+$/) {
+    die "Bad -t option value \"$time\": not look like time\n";
+}
+
+my $slow = $opts{T} || 0;
+if ($slow !~ /\d+$/) {
+    die "Bad -T option value \"$slow\": not look like time\n";
+}
+
+my $slow_condition = <<_EOS_;
+if (elapsed < $slow) {
+    next
+}
+_EOS_
+
+my $preamble = <<_EOS_;
+#! /usr/bin/env stap
+
+global trace%
+global tracet%
+global nreqs
+
+probe begin {
+    warn("Tracing libcurl ($pid) ...")
+    nreqs = 0
+}
+_EOS_
+
+my $stap_src = <<_EOS_;
+$preamble
+
+probe process("$libcurl_path").function("curl_easy_perform") {
+    if ($pid) {
+        if (pid() != target()) {
+            next
+        }
+    }
+    if (\@defined(\$easy)) {
+        change = &\@cast(\$easy, "SessionHandle")->change
+    } else {
+        change = &\@cast(\$curl, "SessionHandle")->change
+    }
+    url = \@cast(change, "DynamicStatic")->url
+    trace[tid()] = url
+    tracet[tid()] = gettimeofday_us()
+}
+
+probe process("$libcurl_path").function("curl_easy_perform").return {
+    if ($pid) {
+        if (pid() != target()) {
+            next
+        }
+    }
+    url = trace[tid()]
+    $slow_condition
+    $url_condition
+    $count_codition
+    if (url) {
+        elapsed = (gettimeofday_us() - tracet[tid()]) / 1000
+        printf("%s(%d) URL:%s RT:%d(ms) RTCODE:%d\\n", execname(), pid(), user_string(url), elapsed, \$return)
+    }
+}
+
+%(
+$time > 0
+%?
+probe timer.ms($time) {
+    warn("Time ending...")
+    exit()
+}
+%:
+probe end {
+    warn("Exiting....")
+}
+%)
+_EOS_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit;
+}
+
+open my $in, "|stap --skip-badvars $stap_args -x $pid -";
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+    return <<'_EOC_';
+Usage:
+    libcurl-watch-req [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -c <count>          Specify the max requests default 100.
+    -t <time>ms         Specify the number of mseconds for sampling.
+    -T <slow time>ms    Specify the threshold of mseconds for sampling.
+    -u <url> /abcd      Url to specify which support POSIX regular.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+Examples:
+    libcurl-watch-req -p 12345 -c 100 -T 1000
+_EOC_
+}

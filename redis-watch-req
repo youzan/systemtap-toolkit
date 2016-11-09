@@ -1,0 +1,467 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.006001;
+use strict;
+use warnings;
+use Getopt::Std qw ( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("a:t:hp:dc:T:t:C:K:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $command = $opts{C} || "";
+my $command_condition = "";
+
+if ($command) {
+   $command_condition = <<_EOS_
+   if (cmd !~ "$command") { next }
+_EOS_
+}
+
+my $key = $opts{C} || "";
+my $key_condition = "";
+
+if ($key) {
+   $key_condition = <<_EOS_
+   if (key !~ "$key") { next }
+_EOS_
+}
+
+
+my $time = $opts{t} || 20000;
+if ($time !~ /^\d+$/) {
+    die "Bad -t option value \"$time\": not look like a time\n";
+}
+
+my $slow = $opts{T} || 0;
+if ($slow !~ /^\d+$/) {
+    die "Bad -T option value \"$slow\": not look like a time\n";
+}
+
+my $slow_codition = <<_EOS_;
+if (elapsed/1000 < $slow) {
+    next
+}
+_EOS_
+
+my $count = $opts{c} || 100;
+if ($count !~ /^\d+$/) {
+    die "Bad -c option value \"$count\": not look like a count\n";
+}
+
+my $count_condition = <<_EOS_;
+    if (++nreqs > $count) {
+        warn("up to max requests: $count")
+        exit();
+    }
+_EOS_
+
+my $pid = $opts{p}
+    or die "No redis process pid specified by the -p option\n";
+if ($pid !~ /^[\d\s]+$/) {
+    die "Bad -p option value \"$pid\": not look like a pid\n";
+}
+
+my @pids = split /\s/, $pid;
+my $pid_codition = "if (!(sprintf(\"%d\", pid()) in pids)) next";
+my $redis_path = "";
+
+for my $pid (@pids) {
+    my $exec_file = "/proc/$pid/exe";
+    if (!-f $exec_file) {
+        die "Redis process $pid is not running or ",
+            "you do not have enough permissions.\n";
+    }
+    $redis_path = readlink $exec_file;
+
+    my $result = `$redis_path --version`;
+    if ($result =~ /Redis server v=(\d+)\.(\d+).(\d+) /) {
+        if ($1 >= 3 && $2 >= 2) {
+            die "only support redis version < 3.2.x";
+        }
+    }
+}
+
+my $pid_preamble = join "\r\n", map("    pids[\"$_\"] = 1", @pids);
+
+my $c = "\@cast(\$c, \"redisClient\")";
+
+my $preamble = <<_EOS_;
+%{
+#define LRU_BITS 24
+#define LRU_CLOCK_MAX ((1<<LRU_BITS)-1) /* Max value of obj->lru */
+#define LRU_CLOCK_RESOLUTION 1000 /* LRU clock resolution in ms */
+typedef struct redisObject {
+    unsigned type:4;
+    unsigned encoding:4;
+    unsigned lru:LRU_BITS; /* lru time (relative to server.lruclock) */
+    int refcount;
+    void *ptr;
+} robj;
+
+struct sdshdr {
+	unsigned int len;
+	unsigned int free;
+	char buf[];
+};
+%}
+
+global whitelist
+global tracet%
+global tracef%
+global tracer%
+global nreqs
+global pids%
+
+probe begin {
+    warn("watching $redis_path($pid) requests\\n")
+    nreqs = 0
+    $pid_preamble
+    whitelist["stepCommand"] = 1
+    whitelist["snowflakeCommand"] = 1
+    whitelist["objectidCommand"] = 1
+    whitelist["serialidCommand"] = 1
+    whitelist["getCommand"] = 1
+    whitelist["setCommand"] = 1
+    whitelist["setnxCommand"] = 1
+    whitelist["setexCommand"] = 1
+    whitelist["psetexCommand"] = 1
+    whitelist["appendCommand"] = 1
+    whitelist["strlenCommand"] = 1
+    whitelist["delCommand"] = 1
+    whitelist["existsCommand"] = 1
+    whitelist["setbitCommand"] = 1
+    whitelist["getbitCommand"] = 1
+    whitelist["setrangeCommand"] = 1
+    whitelist["getrangeCommand"] = 1
+    whitelist["getrangeCommand"] = 1
+    whitelist["incrCommand"] = 1
+    whitelist["decrCommand"] = 1
+    whitelist["mgetCommand"] = 1
+    whitelist["rpushCommand"] = 1
+    whitelist["lpushCommand"] = 1
+    whitelist["rpushxCommand"] = 1
+    whitelist["lpushxCommand"] = 1
+    whitelist["linsertCommand"] = 1
+    whitelist["rpopCommand"] = 1
+    whitelist["lpopCommand"] = 1
+    whitelist["brpopCommand"] = 1
+    whitelist["brpoplpushCommand"] = 1
+    whitelist["blpopCommand"] = 1
+    whitelist["llenCommand"] = 1
+    whitelist["lindexCommand"] = 1
+    whitelist["lsetCommand"] = 1
+    whitelist["lrangeCommand"] = 1
+    whitelist["ltrimCommand"] = 1
+    whitelist["lremCommand"] = 1
+    whitelist["rpoplpushCommand"] = 1
+    whitelist["saddCommand"] = 1
+    whitelist["sremCommand"] = 1
+    whitelist["smoveCommand"] = 1
+    whitelist["sismemberCommand"] = 1
+    whitelist["scardCommand"] = 1
+    whitelist["spopCommand"] = 1
+    whitelist["srandmemberCommand"] = 1
+    whitelist["sinterCommand"] = 1
+    whitelist["sinterstoreCommand"] = 1
+    whitelist["sunionCommand"] = 1
+    whitelist["sunionstoreCommand"] = 1
+    whitelist["sdiffCommand"] = 1
+    whitelist["sdiffstoreCommand"] = 1
+    whitelist["sinterCommand"] = 1
+    whitelist["sscanCommand"] = 1
+    whitelist["zaddCommand"] = 1
+    whitelist["zincrbyCommand"] = 1
+    whitelist["zremCommand"] = 1
+    whitelist["zremrangebyscoreCommand"] = 1
+    whitelist["zremrangebyrankCommand"] = 1
+    whitelist["zremrangebylexCommand"] = 1
+    whitelist["zunionstoreCommand"] = 1
+    whitelist["zinterstoreCommand"] = 1
+    whitelist["zrangeCommand"] = 1
+    whitelist["zrangebyscoreCommand"] = 1
+    whitelist["zrevrangebyscoreCommand"] = 1
+    whitelist["zrangebylexCommand"] = 1
+    whitelist["zrevrangebylexCommand"] = 1
+    whitelist["zcountCommand"] = 1
+    whitelist["zlexcountCommand"] = 1
+    whitelist["zrevrangeCommand"] = 1
+    whitelist["zcardCommand"] = 1
+    whitelist["zscoreCommand"] = 1
+    whitelist["zrankCommand"] = 1
+    whitelist["zrevrankCommand"] = 1
+    whitelist["zscanCommand"] = 1
+    whitelist["hsetCommand"] = 1
+    whitelist["hsetnxCommand"] = 1
+    whitelist["hgetCommand"] = 1
+    whitelist["hmsetCommand"] = 1
+    whitelist["hmgetCommand"] = 1
+    whitelist["hincrbyCommand"] = 1
+    whitelist["hincrbyfloatCommand"] = 1
+    whitelist["hdelCommand"] = 1
+    whitelist["hlenCommand"] = 1
+    whitelist["hkeysCommand"] = 1
+    whitelist["hvalsCommand"] = 1
+    whitelist["hgetallCommand"] = 1
+    whitelist["hexistsCommand"] = 1
+    whitelist["hscanCommand"] = 1
+    whitelist["incrbyCommand"] = 1
+    whitelist["decrbyCommand"] = 1
+    whitelist["incrbyfloatCommand"] = 1
+    whitelist["getsetCommand"] = 1
+    whitelist["msetCommand"] = 1
+    whitelist["msetnxCommand"] = 1
+    whitelist["randomkeyCommand"] = 1
+    whitelist["selectCommand"] = 1
+    whitelist["moveCommand"] = 1
+    whitelist["renameCommand"] = 1
+    whitelist["renamenxCommand"] = 1
+    whitelist["expireCommand"] = 1
+    whitelist["expireatCommand"] = 1
+    whitelist["pexpireCommand"] = 1
+    whitelist["pexpireatCommand"] = 1
+    whitelist["keysCommand"] = 1
+    whitelist["scanCommand"] = 1
+    whitelist["dbsizeCommand"] = 1
+    whitelist["authCommand"] = 1
+    whitelist["pingCommand"] = 1
+    whitelist["echoCommand"] = 1
+    whitelist["saveCommand"] = 1
+    whitelist["bgsaveCommand"] = 1
+    whitelist["bgrewriteaofCommand"] = 1
+    whitelist["shutdownCommand"] = 1
+    whitelist["lastsaveCommand"] = 1
+    whitelist["typeCommand"] = 1
+    whitelist["multiCommand"] = 1
+    whitelist["execCommand"] = 1
+    whitelist["discardCommand"] = 1
+    whitelist["syncCommand"] = 1
+    whitelist["syncCommand"] = 1
+    whitelist["replconfCommand"] = 1
+    whitelist["flushdbCommand"] = 1
+    whitelist["flushallCommand"] = 1
+    whitelist["sortCommand"] = 1
+    whitelist["infoCommand"] = 1
+    whitelist["monitorCommand"] = 1
+    whitelist["ttlCommand"] = 1
+    whitelist["pttlCommand"] = 1
+    whitelist["persistCommand"] = 1
+    whitelist["slaveofCommand"] = 1
+    whitelist["debugCommand"] = 1
+    whitelist["configCommand"] = 1
+    whitelist["subscribeCommand"] = 1
+    whitelist["unsubscribeCommand"] = 1
+    whitelist["psubscribeCommand"] = 1
+    whitelist["punsubscribeCommand"] = 1
+    whitelist["publishCommand"] = 1
+    whitelist["pubsubCommand"] = 1
+    whitelist["watchCommand"] = 1
+    whitelist["unwatchCommand"] = 1
+    whitelist["restoreCommand"] = 1
+    whitelist["migrateCommand"] = 1
+    whitelist["dumpCommand"] = 1
+    whitelist["objectCommand"] = 1
+    whitelist["clientCommand"] = 1
+    whitelist["evalCommand"] = 1
+    whitelist["evalShaCommand"] = 1
+    whitelist["slowlogCommand"] = 1
+    whitelist["scriptCommand"] = 1
+    whitelist["timeCommand"] = 1
+    whitelist["bitopCommand"] = 1
+    whitelist["bitcountCommand"] = 1
+    whitelist["bitposCommand"] = 1
+    whitelist["pfselftestCommand"] = 1
+    whitelist["pfaddCommand"] = 1
+    whitelist["pfcountCommand"] = 1
+    whitelist["pfmergeCommand"] = 1
+    whitelist["pfdebugCommand"] = 1
+}
+
+function objgetstringlen:long(obj) %{
+    void *ptr = ((struct redisObject *)STAP_ARG_obj)->ptr;
+    struct sdshdr *sh = (void*)(ptr-(sizeof(struct sdshdr)));
+
+    if (sh) {
+        STAP_RETVALUE = sh->len;
+    } else {
+        STAP_ERROR("sh is null");
+    }
+%}
+
+function objtostring:string(obj) %{
+    void *ptr = ((struct redisObject *)STAP_ARG_obj)->ptr;
+    sprintf(STAP_RETVALUE, "%s", (char *)ptr);
+%}
+
+function sdslen:long(s) %{
+    struct sdshdr *sh = (void*)(STAP_ARG_s-(sizeof(struct sdshdr)));
+    if (sh) {
+        STAP_RETVALUE = sh->len;
+    } else {
+        STAP_ERROR("sh is null");
+    }
+%}
+
+_EOS_
+
+my $stap_src = <<_EOS_;
+$preamble
+
+probe process("$redis_path").function("*Command") {
+    $pid_codition
+	if (!(ppfunc() in whitelist)) {
+		next
+	} else {
+        if (\@defined(\$c)) {
+            id = $c->id
+            fd = $c->fd
+            ac = $c->argc
+
+            cmd = "null"
+            key = "null"
+            valuelen = -1
+
+            if (ac == 1) {
+                cmdobj = $c->argv[0]
+                cmd = objtostring(cmdobj)
+
+            } else if (ac == 2) {
+                cmdobj = $c->argv[0]
+                keyobj = $c->argv[1]
+
+                cmd = objtostring(cmdobj)
+                key = objtostring(keyobj)
+            } else if (ac == 3) {
+                cmdobj = $c->argv[0]
+                keyobj = $c->argv[1]
+                valueobj = $c->argv[2]
+
+                cmd = objtostring(cmdobj)
+                key = objtostring(keyobj)
+                valuelen = objgetstringlen(valueobj)
+            } else if (ac > 3) {
+                cmdobj = $c->argv[0]
+                cmd = objtostring(cmdobj)
+
+                keyobj = $c->argv[1]
+                key = objtostring(keyobj)
+            }
+            $command_condition
+            $count_condition
+
+            tracef[pid(), ppfunc()] = sprintf("id:%d fd:%d ==> %s %s #%d", id, fd, cmd, key, valuelen)
+            tracet[pid(), ppfunc()] = gettimeofday_us()
+        }
+    }
+}
+
+probe process("$redis_path").function("_addReplyToBuffer") {
+    $pid_codition
+	bytes = tracer[pid()]
+	if (!bytes) {
+		bytes = 0
+	}
+	if (\$len) {
+		bytes += \$len
+	}
+	tracer[pid()] = bytes
+}
+
+probe process("$redis_path").function("_addReplyObjectToList") {
+    $pid_codition
+	bytes = tracer[pid()]
+	if (!bytes) {
+		bytes = 0
+	}
+	if (\$o) {
+		bytes += objgetstringlen(\$o)
+	}
+	tracer[pid()] = bytes
+}
+
+probe process("$redis_path").function("_addReplySdsToList") {
+    $pid_codition
+	bytes = tracer[pid()]
+	if (!bytes) {
+		bytes = 0
+	}
+	if (\$s) {
+		bytes += sdslen(\$s)
+	}
+	tracer[pid()] = bytes
+}
+
+probe process("$redis_path").function("_addReplyObjectToList")!,
+      process("$redis_path").function("asyncCloseClientOnOutputBufferLimitReached")
+{
+    $pid_codition
+	tracer[pid()] = \$c->reply_bytes
+}
+
+probe process("$redis_path").function("*Command").return {
+    $pid_codition
+	if (!(ppfunc() in whitelist)) {
+		next
+	} else {
+        bytes = tracer[pid()]
+        summary = tracef[pid(), ppfunc()]
+        begin = tracet[pid(), ppfunc()]
+        if (begin) {
+            elapsed = gettimeofday_us() - begin
+            $slow_codition
+            printf("%s(%d) RT:%d(us) REQ: %s RES: #%d\\n", execname(), pid(), elapsed, summary, bytes);
+        }
+
+        delete tracet[pid(), ppfunc()]
+        delete tracef[pid(), ppfunc()]
+        delete tracer[pid()]
+    }
+}
+
+probe timer.ms($time) {
+    warn("Time is ending")
+    exit();
+}
+
+_EOS_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit;
+}
+
+open my $in, "|stap --skip-badvars -g -";
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+    return <<'_EOS_';
+Usage:
+    redis-watch-req [optoins]
+
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+    -p <pid>            Specify the redis process pid.
+    -c <count>          Specify the max requests default 100.
+    -C <CMD>            Specify the command to sampling.
+    -K <KEY>            Specify the key to sampling.
+    -t <time>ms         Specify the number of milliseconds for sampling.
+    -T <slow time>ms    Specify the threshold of milliseconds for sampling.
+
+Examples:
+    redis-watch-req -p 12345 -t 10000 -c 1000
+_EOS_
+}

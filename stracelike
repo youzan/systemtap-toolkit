@@ -1,0 +1,119 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.006001;
+use strict;
+use warnings;
+use Getopt::Std qw ( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("a:t:hp:d", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $stap_args = $opts{a} || '';
+
+my $pid = $opts{p}
+    or die "No -p option specify\n";
+
+if ($pid !~ /^\d+$/) {
+   die "Bad -p options value \"$pid\": not look like pid";
+}
+
+my $time = $opts{t} || 20000;
+
+if ($time !~ /^\d+$/) {
+   die "Bad -t options value \"$time\": not look like time";
+}
+
+
+my $preamble = <<_EOS_;
+global thread_args%
+global thread_t%
+global blacklist[2]
+
+probe begin {
+    /* list those syscalls that never .return */
+    blacklist["exit"]=1
+    blacklist["exit_group"]=1
+
+    warn("stracing syscall")
+}
+_EOS_
+
+my $stap_src = <<_EOS_;
+$preamble
+
+probe nd_syscall.* {
+    if (pid() != target()) next
+
+    now = gettimeofday_us()
+
+    if (name in blacklist) {
+        prefix = sprintf("%s[%d] %s.%06d ", execname(), pid(), ctime(now/1000000), now%1000000)
+        printf("%s %s(%s)\\n", prefix, name, argstr)
+        next
+    }
+
+    thread_t[pid()] = now
+    thread_args[pid()] = argstr
+}
+
+probe nd_syscall.*.return {
+    if (pid() != target()) next
+
+    now = gettimeofday_us()
+    last = thread_t[pid()]
+    argstr = thread_args[pid()]
+
+    if (last) {
+        diff = now -last
+        prefix = sprintf("%s.%06d ", ctime(last/1000000), last%1000000)
+        suffix = sprintf(" <%d.%06d>", diff/1000000, diff%1000000)
+        printf("%s %s(%s) = %s%s\\n", prefix, name, argstr, retstr, suffix)
+    }
+
+    delete thread_t[pid()]
+    delete thread_args[pid()]
+}
+
+probe timer.ms($time) {
+    exit()
+}
+_EOS_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit;
+}
+
+open my $in, "| stap --skip-badvars -x $pid $stap_args -";
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+    return <<'_EOS_';
+Usage:
+    stracelike [optoins]
+
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+    -p <pid>            Specify the user process pid.
+    -t <seconds>        Specify the number of seconds for sampling.
+
+Examples:
+    stracelike -p 12345 -t 10000
+_EOS_
+}
+
