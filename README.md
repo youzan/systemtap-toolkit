@@ -22,7 +22,7 @@ systemtap-toolkit
 Description
 ===========
 
-This is [@YouZan] systemtap toolkit to online analyze the complicated problem on production with heavy load. All tools are based on my favorite linux tracing/probing tool [systemtap].
+This is [@YouZan] systemtap toolkit to online analyze the complicated problem on production with heavy load. All tools are based on the amazing linux tracing/probing tool [systemtap].
 
 Any guys which want to know  what the hell it is in the user space and kernel space should be to learn [systemtap] which is awesome tool:)
 
