@@ -57,8 +57,8 @@ requirements
 We need [systemtap] and [dwarf].
 some scripts are working on kernel space and other is working on the user space.
 
-For kernel space, we need kernel debuginfo like `kernel-debuginfo-3.10.0-327.28.3.el7.x86_64`.
-For user space, we need user application debuginfo like `redis-debuginfo-2.8.19-2.el7.x86_64`.
+For kernel space, we need kernel debuginfo like `kernel-debuginfo-3.10.0-327.28.3.el7.x86_64`.    
+For user space, we need user application debuginfo like `redis-debuginfo-2.8.19-2.el7.x86_64`.    
 
 For *redhat*\* linux version, we can install as the following:
 
