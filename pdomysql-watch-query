@@ -11,11 +11,31 @@ sub usage();
 
 my %opts;
 
-getopts("ht:p:l:dt:s:c:T:P:", \%opts) or die usage();
+getopts("ht:p:l:dt:s:c:T:P:m", \%opts) or die usage();
 
 if ($opts{h}) {
     print usage();
     exit;
+}
+
+my $mysql_nd = $opts{m} || "";
+my $mysql_nd_condition = "";
+if ($mysql_nd) {
+    $mysql_nd_condition = <<_EOS_;
+    host = server->host ? server->host : server->host_info
+    host_len = 0
+    port = server->port
+    user = server->user
+
+_EOS_
+} else {
+    $mysql_nd_condition = <<_EOS_;
+    host_len = server->data->host_len
+    host = server->data->host
+    port = server->data->port
+    user = server->data->user
+
+_EOS_
 }
 
 my $port = $opts{P} || "";
@@ -111,16 +131,7 @@ probe process("$php_path").function("pdo_mysql_stmt_execute") {
         H = \@cast(S, "pdo_mysql_stmt")->H
         server = \@cast(H, "pdo_mysql_db_handle")->server
 
-        if (\@defined(server->data)) {
-            host_len = server->data->host_len
-            host = server->data->host
-            port = server->data->port
-            user = server->data->user
-        } else {
-            host = server->host ? server->host : server->host_info
-            port = server->port
-            user = server->user
-        }
+        $mysql_nd_condition
 
         $port_condition
 
@@ -176,6 +187,7 @@ Options:
     -a <args>           Pass extra arguments to the stap utility.
     -d                  Dump out the systemtap script source.
     -h                  Print this usage.
+    -m                  Specify the pdo mysql for old struct.
     -p <pid>            Specify the pid to sampling.
     -l <pdo_mysql.so>   Specify the path of pdo_mysql.so to sampling.
     -c <count>          Specify the max requests default 100.
