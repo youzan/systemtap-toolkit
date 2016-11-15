@@ -48,6 +48,8 @@ Table of Contents
 * [libcurl-watch-req](#libcurl-watch-req)
 * [pdomysql-watch-query](#pdomysql-watch-query)
 * [io-process-top](#io-process-top)
+* [phpredis-watch-req](#phpredis-watch-req)
+
 
 requirements
 ============
@@ -260,6 +262,23 @@ php-fpm(12896) 172.17.10.196:3306@root: SELECT * from person RT:0(ms) RTCODE:1
 php-fpm(12896) 172.17.10.196:3306@root: SELECT * from person RT:8(ms) RTCODE:1
 php-fpm(12896)172.17.10.196:3306@root: SELECT sleep(5) RT:5012(ms) RTCODE:1
 ````
+
+phpredis-watch-req
+=================
+It traceing the userland, which can trace the php redis request
+
+```bash
+[root@localhost systemtap-toolkit]# ./phpredis-watch-req -l /usr/lib64/php/modules/redis.s
+
+Tracing phpredis (/usr/lib64/php/modules/redis.so)
+
+php(17226)<zim_Redis___construct[22us]>
+php(17226)<zim_Redis_connect[113us]>
+php(17226)<zim_Redis_get[157us]>:*2 $3 GET $3 key
+php(17226)<zim_Redis_hGet[563us]>:*3 $4 HGET $3 key $6 ffffff
+php(17226)<zim_Redis_set[617us]>:*3 $3 SET $3 key $4 abcd
+php(17226)<zim_Redis___destruct[12us]>
+```
 
 io-process-top
 =================
