@@ -19,6 +19,15 @@ if ($opts{h}) {
 }
 
 my $pid = $opts{p} || 0;
+my $pid_condition = "";
+if ($pid) {
+    $pid_condition = <<_EOS_;
+    if ($pid > 0) {
+        if (pid() != $pid) next
+    }
+_EOS_
+}
+
 my $time = $opts{t} || 20000;
 if ($time !~ /^\d+$/) {
     die "Bad -t option value \"$time\": not look like time\n";
@@ -51,11 +60,13 @@ my $stap_src = <<_EOS_;
 $preamble
 
 probe process("$phpredis_path").function("zim_Redis_*") {
+    $pid_condition
     pp[tid()] = sprintf("%s", ppfunc())
     t[ppfunc(), tid()] = gettimeofday_us()
 }
 
 probe process("$phpredis_path").function("zim_Redis_*").return {
+    $pid_condition
     begin = t[ppfunc(), tid()]
 
     if (begin) {
@@ -75,6 +86,8 @@ probe process("$phpredis_path").function("zim_Redis_*").return {
 }
 
 probe process("$phpredis_path").function("redis_sock_write") {
+    $pid_condition
+
     func = pp[tid()]
     if (func != "") {
         k[tid()] = sprintf("%s", str_replace(user_string_n(\$cmd, \$sz), "\\r\\n", " "))
