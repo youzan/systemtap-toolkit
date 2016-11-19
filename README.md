@@ -49,6 +49,7 @@ Table of Contents
 * [pdomysql-watch-query](#pdomysql-watch-query)
 * [io-process-top](#io-process-top)
 * [phpredis-watch-req](#phpredis-watch-req)
+* [nssdns-watch-question](#nssdns-watch-question)
 
 
 requirements
@@ -296,6 +297,15 @@ WARNING: Collecting IO Process Top 10 with interval of 1000ms
         in:imjournal(595)             0           0
 ````
 
+nssdns-watch-question
+=====================
+It tracing the libnss_dns.so for dns query.
 
+```bash
+[root@localhost systemtap-toolkit]# ./nssdns-watch-question -l /usr/lib64/libnss_dns.so. -t 100000
+WARNING: Tracing libnss_dns(/usr/lib64/libnss_dns.so.2) for pid:0
 
-
+curl(11786): www.google.com 57994us
+curl(11788): www.facebook.com 57406us
+curl(11790): www.github.com 4203477us
+```
