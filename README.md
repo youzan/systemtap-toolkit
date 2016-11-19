@@ -269,7 +269,7 @@ phpredis-watch-req
 It traceing the userland, which can trace the php redis request
 
 ```bash
-[root@localhost systemtap-toolkit]# ./phpredis-watch-req -l /usr/lib64/php/modules/redis.s
+[root@localhost systemtap-toolkit]# ./phpredis-watch-req -l /usr/lib64/php/modules/redis.so
 
 Tracing phpredis (/usr/lib64/php/modules/redis.so)
 
