@@ -1,0 +1,133 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.006001;
+use strict;
+use warnings;
+use Getopt::Std qw( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("a:hdl:p:t:T:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $libnss_path = $opts{l} || "";
+if (!-f $libnss_path) {
+    die "libnss_dns.so path $libnss_path is not exist or ",
+    "you do not have enough permissions.\n";
+}
+
+my $pid = $opts{p} || 0;
+if ($pid !~ /^\d+$/) {
+    die "Bad -p option value \"$pid\": not look like a pid\n";
+}
+my $pid_condition = "";
+if ($pid) {
+    $pid_condition = <<_EOS_;
+    if ($pid > 0) {
+        if (pid() != $pid) next
+    }
+_EOS_
+}
+
+my $time = $opts{t} || 20000;
+if ($time !~ /^\d+$/) {
+    die "Bad -t option value \"$time\": not look like time\n";
+}
+
+my $slowtime = $opts{T} || 0;
+if ($slowtime !~ /^\d+$/) {
+    die "Bad -T option value \"$slowtime\": not look like time\n";
+}
+my $slowtime_condition = "";
+if ($slowtime) {
+   $slowtime_condition = <<_EOS_;
+   if ($slowtime * 1000 >= elapsed) {
+        next
+   }
+_EOS_
+}
+
+my $stap_args = $opts{a} || '';
+
+my $preamble = <<_EOS_;
+global c%
+global t%
+
+probe begin {
+    warn("Tracing libnss_dns($libnss_path) for pid:$pid")
+}
+_EOS_
+
+my $stap_src = <<_EOS_;
+$preamble
+
+probe process("$libnss_path").function("_nss_dns_gethostbyname*") {
+    $pid_condition
+    c[pid(), execname(), ppfunc()] = \$name
+    t[pid(), execname(), ppfunc()] = gettimeofday_us()
+}
+
+probe process("$libnss_path").function("_nss_dns_gethostbyname*").return {
+    $pid_condition
+    name = c[pid(), execname(), ppfunc()]
+    begin = t[pid(), execname(), ppfunc()]
+    if (name) {
+        elapsed = gettimeofday_us() - begin
+        $slowtime_condition
+        printf("%s(%d): %s %dus\\n", execname(), pid(), user_string(name), elapsed)
+    }
+
+    delete c[pid(), execname(), ppfunc()]
+    delete t[pid(), execname(), ppfunc()]
+}
+
+%(
+$time > 0
+%?
+probe timer.ms($time) {
+    warn("Time Ending....")
+    exit()
+}
+%:
+probe end {
+    exit()
+}
+%)
+_EOS_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit;
+}
+
+open my $in, "|stap --skip-badvars $stap_args -"
+    or die "Cannot run stap: $!\n";
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+
+    return <<'_EOC_';
+Usage:
+    nssdns-watch-question [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+    -l <libnss_dns>     Specify the path of libnss_dns.so to sampling.
+    -t <time>ms         Specify the number of mseconds for sampling.
+    -T <slow time>ms    Specify the threshold of mseconds for sampling.
+Examples:
+    nssdns-watch-question -l /usr/lib64/libnss_dns.so.2
+_EOC_
+}
