@@ -1,0 +1,131 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.006001;
+use strict;
+use warnings;
+use Getopt::Std qw( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("a:hdl:p:t:T:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $fpm_path = $opts{l} || "";
+if (! -f $fpm_path) {
+    die "php-fpm path $fpm_path is not exist or ",
+    "you do not have enough permissions.\n";
+}
+
+my $pid = $opts{p} || 0;
+my $pid_condition = "";
+if ($pid) {
+    $pid_condition = <<_EOS_;
+    if ($pid > 0) {
+        if (pid() != $pid) next
+    }
+_EOS_
+}
+
+my $time = $opts{t} || 20000;
+if ($time !~ /^\d+$/) {
+    die "Bad -t option value \"$time\": not look like time\n";
+}
+
+my $slowtime = $opts{T} || 0;
+if ($slowtime !~ /^\d+$/) {
+    die "Bad -T option value \"$slowtime\": not look like time\n";
+}
+my $slowtime_condtion = "";
+if ($slowtime) {
+    $slowtime_condtion = <<_EOS_;
+    if ($slowtime * 1000 > elapsed) { next }
+_EOS_
+}
+
+my $stap_args = $opts{a} || '';
+
+my $preamble = <<_EOS_;
+global t%
+
+probe begin {
+    warn("Tracing php-fpm for pid($pid)")
+}
+_EOS_
+
+my $stap_src = <<_EOS_;
+$preamble
+
+probe process("$fpm_path").function("fcgi_accept_request").return {
+    $pid_condition
+    t[pid()] = gettimeofday_us()
+}
+
+probe process("$fpm_path").function("php_request_shutdown") {
+    $pid_condition
+    begin = t[pid()]
+    if (begin) {
+        $slowtime_condtion
+        elapsed = gettimeofday_us() - begin
+        fpm_scoreboard = \@var("fpm_scoreboard")
+        fpm_scoreboard_i = \@var("fpm_scoreboard_i")
+        proc = fpm_scoreboard->procs[fpm_scoreboard_i];
+        request_uri = proc->request_uri;
+        request_method = proc->request_method;
+        query_string = proc->query_string
+        printf("php-fpm(%d) %s %s?%s (%dus)\\n", pid(), user_string(request_method), user_string(request_uri), user_string(query_string), elapsed);
+    }
+
+    delete t[tid()]
+}
+
+%(
+$time > 0
+%?
+probe timer.ms($time) {
+    warn("Time Ending....")
+    exit()
+}
+%:
+probe end {
+    exit()
+}
+%)
+_EOS_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit;
+}
+
+open my $in, "|stap --skip-badvars $stap_args -"
+    or die "Cannot run stap: $!\n";
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+
+    return <<'_EOC_';
+Usage:
+    phpfpm-watch-req [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+    -l <php-fpm path>   Specify the path of php-fpm to sampling.
+    -p <pid>            Specify the pid to sampling.
+    -t <time>ms         Specify the number of mseconds for sampling.
+    -T <slow time>ms    Specify the threshold of mseconds for sampling.
+Examples:
+    phpfpm-watch-req -l /opt/php/sbin/php-fpm -t 100000
+_EOC_
+}

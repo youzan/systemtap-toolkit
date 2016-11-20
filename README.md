@@ -50,6 +50,7 @@ Table of Contents
 * [io-process-top](#io-process-top)
 * [phpredis-watch-req](#phpredis-watch-req)
 * [nssdns-watch-question](#nssdns-watch-question)
+* [phpfpm-watch-req](#phpfpm-watch-req)
 
 
 requirements
@@ -308,4 +309,18 @@ WARNING: Tracing libnss_dns(/usr/lib64/libnss_dns.so.2) for pid:0
 curl(11786): www.google.com 57994us
 curl(11788): www.facebook.com 57406us
 curl(11790): www.github.com 4203477us
+```
+
+
+phpfpm-watch-req
+================
+It tracing phpfpm request
+
+```bash
+# ./phpfpm-watch-req -l /opt/php/sbin/php-fpm
+WARNING: Tracing php-fpm for pid(0)
+php-fpm(9665) GET /index.php?&123123=123&f=q (208us)
+php-fpm(9665) GET /index.php?&123123=123&f=q (172us)
+php-fpm(9665) GET /index.php?&123123=123&f=q (154us)
+php-fpm(9665) GET /index.php?&123123=123&f=q (151us)
 ```
