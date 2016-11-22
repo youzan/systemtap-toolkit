@@ -1,0 +1,89 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.0006001;
+use strict;
+use warnings;
+use Getopt::Std qw ( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("ha:dt:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage;
+    exit;
+}
+
+my $stap_args = $opts{a} || "";
+
+my $time = $opts{t} || 5000;
+
+my $stap_src = <<_EOC_;
+global rw
+global total%
+
+probe begin {
+    warn("Collecting Net Process Top 10 with interval of ${time}ms")
+}
+
+probe netdev.receive {
+    rw[0, pid(), execname(), dev_name] <<< length
+}
+
+probe netdev.transmit {
+    rw[1, pid(), execname(), dev_name] <<< length
+}
+
+probe timer.ms($time) {
+    foreach ([type, pid, execname, dev_name] in rw) {
+        if (type == 0) {
+            total[pid, execname, dev_name] += \@count(rw[0, pid, execname, dev_name])
+        } else {
+            total[pid, execname, dev_name] += \@count(rw[1, pid, execname, dev_name])
+        }
+    }
+    #ansi_clear_screen()
+    printf("%20s(%5d) %6s %10s %10s %10s %10s\\n", "Process", 0, "dev", "Send(PK)", "Recv(PK)",
+            "Send(KB)", "Recv(KB)");
+    foreach ([pid, execname, dev_name] in total - limit 10) {
+        printf("%20s(%5d) %6s %10d %10d %10d %10d\\n", execname, pid, dev_name,
+            \@count(rw[1, pid, execname, dev_name]),
+            \@count(rw[0, pid, execname, dev_name]),
+            \@sum(rw[1, pid, execname, dev_name]) / 1024,
+            \@sum(rw[0, pid, execname, dev_name]) / 1024
+        )
+    }
+
+    delete rw
+    delete total
+}
+_EOC_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit;
+}
+
+open my $in, "| stap $stap_args --skip-badvars -";
+
+print $in $stap_src;
+
+close $in;
+
+sub usage() {
+    return <<'_EOC_';
+Usage:
+    net-process-top [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+    -t <time>(ms)       Specify the interval time to sampling.
+Examples:
+    net-process-top
+_EOC_
+}
