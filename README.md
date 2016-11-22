@@ -298,6 +298,20 @@ WARNING: Collecting IO Process Top 10 with interval of 1000ms
         in:imjournal(595)             0           0
 ````
 
+net-process-top
+=================
+It traceing net Send|Recv with the view of process(pid).
+
+```bash
+[root@localhost systemtap-toolkit]# ./net-process-top -t 5000
+WARNING: Collecting Net Process Top 10 with interval of 5000ms
+             Process(    0)    dev   Send(PK)   Recv(PK)   Send(KB)   Recv(KB)
+               nginx( 7266)     lo     446203          0     144471          0
+                 wrk(27496)     lo     156601          0      15599          0
+           rcu_sched(   10)   eth0          0          1          0          0
+                sshd( 6890)   eth0          1          0          0          0
+```
+
 nssdns-watch-question
 =====================
 It tracing the libnss_dns.so for dns query.
