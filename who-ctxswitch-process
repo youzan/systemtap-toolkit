@@ -1,0 +1,109 @@
+#! /usr/bin/env perl
+
+# Copyright (C) YangBingwu (detailyang)
+
+use 5.0006001;
+use strict;
+use warnings;
+use Getopt::Std qw ( getopts );
+
+sub usage();
+
+my %opts;
+
+getopts("hda:t:p:", \%opts) or die usage();
+
+if ($opts{h}) {
+    print usage();
+    exit;
+}
+
+my $stap_args = $opts{a} || '';
+getopts('dp:t:', \%opts) or die usage();
+
+my $time = $opts{t} || 10000;
+if ($time !~ /^\d+$/) {
+   die "Bad -t options value \"$time\": not look like time";
+}
+
+my $pid = $opts{p} || "";
+if ($pid !~ /^\d+$/) {
+    die "Bad -p options value \"$pid\": not look like pid";
+}
+
+my $preamble = <<_EOC_;
+probe begin {
+    printf("Collecting who is context switch $pid \\r\\n");
+}
+_EOC_
+
+my $stap_src = <<_EOC_;
+$preamble
+
+function state_calc:string(state:long) {
+    if(state == 0)
+    status = "R"
+    if(state == 1)
+    status = "S"
+    if(state == 2)
+    status = "D"
+    if(state == 4)
+    status = "T"
+    if(state == 8)
+    status = "T"
+    if(state == 16)
+    status = "Z"
+    if(state == 32)
+    status = "EXIT_DEAD"
+
+    return status
+}
+
+probe scheduler.ctxswitch
+{
+    if (next_pid != $pid && prev_pid != $pid) next
+
+    prev = sprintf("%-16s(%5d)<%s>",
+        prev_task_name,
+        prev_pid, state_calc(prevtsk_state)
+            )
+    _next = sprintf("%-16s(%5d)<%s>",
+        next_task_name,
+        next_pid,
+        state_calc(nexttsk_state))
+    printf("[%d] %-36s => %-36s\\n",
+        task_cpu(prev_task),
+            prev, _next)
+}
+
+probe timer.ms($time) {
+    exit()
+}
+_EOC_
+
+if ($opts{d}) {
+    print $stap_src;
+    exit();
+}
+
+open my $in, "| stap $stap_args --skip-badvars -";
+
+print $in $stap_src;
+
+close $in;
+
+
+sub usage() {
+    return <<'_EOC_';
+Usage:
+    who-ctxswitch-process [optoins]
+Options:
+    -a <args>           Pass extra arguments to the stap utility.
+    -t <time>(ms)       Time(ms) to execute.
+    -p <pid>            Specify the user process pid.
+    -d                  Dump out the systemtap script source.
+    -h                  Print this usage.
+Examples:
+    who-ctxswitch-process -t 10000 -p 1234
+_EOC_
+}
