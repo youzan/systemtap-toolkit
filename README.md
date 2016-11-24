@@ -38,6 +38,7 @@ Table of Contents
 * [tcp-active-syn-ack-time](#tcp-active-syn-ack-time)
 * [tcp-retrans](#tcp-retrans)
 * [who-open-file](#who-open-file)
+* [who-ctxswitch-process](#who-ctxswitch-process)
 * [syscall-connect](#syscall-connect)
 * [sample-bt](#sample-bt)
 * [watch-var](#watch-var)
@@ -149,6 +150,20 @@ Collecting who is opening filename 123
 cat(13740) is opening the filename: "123"
 cat(13741) is opening the filename: "123"
 ````
+
+who-ctxswitch-process
+=====================
+Tracing context switch for specified process.
+
+```bash
+[root@localhost systemtap-toolkit]# ./who-ctxswitch-process -p 6354
+Collecting who is context switch 6354
+[0] swapper/0       (    0)<R>           => nginx           ( 6354)<R>
+[0] nginx           ( 6354)<S>           => nginx           ( 6355)<R>
+[0] nginx           ( 6355)<D>           => nginx           ( 6354)<R>
+[0] nginx           ( 6354)<S>           => rcu_sched       (   10)<R>
+[0] nginx           ( 6355)<D>           => nginx           ( 6354)<R>
+```
 
 syscall-connect
 ==============
