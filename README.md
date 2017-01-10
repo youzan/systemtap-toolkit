@@ -53,6 +53,7 @@ Table of Contents
 * [phpredis-watch-req](#phpredis-watch-req)
 * [nssdns-watch-question](#nssdns-watch-question)
 * [phpfpm-watch-req](#phpfpm-watch-req)
+* [swoole-redis-watch](#swoole-redis-watch)
 
 
 requirements
@@ -61,8 +62,9 @@ requirements
 We need [systemtap] and [dwarf].
 some scripts are working on kernel space and other is working on the user space.
 
-For kernel space, we need kernel debuginfo like `kernel-debuginfo-3.10.0-327.28.3.el7.x86_64`.    
-For user space, we need user application debuginfo like `redis-debuginfo-2.8.19-2.el7.x86_64`.    
+For kernel space, we need kernel debuginfo like `kernel-debuginfo-3.10.0-327.28.3.el7.x86_64`.
+
+For user space, we need user application debuginfo like `redis-debuginfo-2.8.19-2.el7.x86_64`.
 
 For *redhat*\* linux version, we can install as the following:
 
@@ -353,4 +355,29 @@ php-fpm(9665) GET /index.php?&123123=123&f=q (208us)
 php-fpm(9665) GET /index.php?&123123=123&f=q (172us)
 php-fpm(9665) GET /index.php?&123123=123&f=q (154us)
 php-fpm(9665) GET /index.php?&123123=123&f=q (151us)
+```
+
+swoole-redis-watch
+==================
+It tracing swoole-redis write and read subroutine
+
+```bash
+./swoole-redis-watch -l /opt/php/lib/php/extensions/no-debug-non-zts-20131226/swoole.so -t 100000
+WARNING: Tracing swoole.so(/opt/php/lib/php/extensions/no-debug-non-zts-20131226/swoole.so) for pid:0
+php(25927) is writing for 10.200.175.90:6379 to size(41) *3
+$4
+hGet
+$4
+step
+$10
+attachment
+10.200.175.90:6379 get reply: integer:710263830
+php(29486) is writing for 10.200.175.90:6379 to size(41) *3
+$4
+hGet
+$4
+step
+$10
+attachment
+10.200.175.90:6379 get reply: integer:709720993
 ```
